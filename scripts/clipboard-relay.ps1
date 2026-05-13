@@ -287,6 +287,7 @@ function Send-Clipboard {
         action = 'send'
         item = Get-ClipboardDisplayLabel -Type $manifest.type -Names $copiedNames
         type = $manifest.type
+        names = if ($manifest.type -eq 'files') { $copiedNames } else { @() }
     }
 }
 
