@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('send', 'receive')]
     [string]$Mode,
@@ -56,16 +56,46 @@ function Get-ClipboardText {
     }
 }
 
+function Normalize-PathList {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Items
+    )
+
+    $normalized = @()
+    foreach ($item in $Items) {
+        if ($null -eq $item) {
+            continue
+        }
+
+        if (($item -is [System.Collections.IEnumerable]) -and -not ($item -is [string])) {
+            $normalized += Normalize-PathList -Items @($item)
+            continue
+        }
+
+        $text = [string]$item
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            continue
+        }
+
+        $parts = $text -split '\r?\n'
+        foreach ($part in $parts) {
+            if (-not [string]::IsNullOrWhiteSpace($part)) {
+                $normalized += [string]$part
+            }
+        }
+    }
+
+    return $normalized
+}
+
 function Get-ClipboardPaths {
     if ($script:hasInputPaths) {
-        return @($script:InputPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        return @(Normalize-PathList -Items @($script:InputPaths))
     }
 
     try {
-        return @(
-            Get-Clipboard -Format FileDropList -ErrorAction Stop |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-        )
+        return @(Normalize-PathList -Items @(Get-Clipboard -Format FileDropList -ErrorAction Stop))
     } catch {
         return @()
     }
@@ -129,16 +159,59 @@ function Resolve-RelayPath {
     return Join-Path $RelayRoot $RelativePath
 }
 
+function Clear-RelayItems {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ItemsRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $ItemsRoot)) {
+        return
+    }
+
+    foreach ($child in Get-ChildItem -LiteralPath $ItemsRoot -Force) {
+        try {
+            Remove-Item -LiteralPath $child.FullName -Recurse -Force -ErrorAction Stop
+        } catch {
+            # OneDrive and other sync clients can hold reparse points or files open briefly.
+            # Cleanup is best-effort so a send can still complete and advance latest.json.
+        }
+    }
+}
+
+function Get-ClipboardDisplayLabel {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Type,
+        [string[]]$Names = @()
+    )
+
+    if ($Type -eq 'files') {
+        if ($Names.Count -eq 1) {
+            return $Names[0]
+        }
+
+        if ($Names.Count -gt 1) {
+            return ('{0} files: {1}' -f $Names.Count, ($Names -join ', '))
+        }
+
+        return '[clipboard files]'
+    }
+
+    return '[clipboard text]'
+}
 function Send-Clipboard {
     $relayRoot = Resolve-RelayRoot
     $itemsRoot = Join-Path $relayRoot 'items'
     New-Item -ItemType Directory -Force -Path $itemsRoot | Out-Null
+    Clear-RelayItems -ItemsRoot $itemsRoot
 
     $itemId = New-ItemId
     $itemDir = Join-Path $itemsRoot $itemId
     New-Item -ItemType Directory -Force -Path $itemDir | Out-Null
 
     $machine = $env:COMPUTERNAME
+    $copiedNames = @()
     $manifest = $null
 
     $paths = @()
@@ -151,11 +224,15 @@ function Send-Clipboard {
         $staging = Join-Path $env:TEMP ("clipboard-relay-{0}" -f $itemId)
         New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
-        $copiedNames = @()
         foreach ($path in $paths) {
-            $leaf = Split-Path -Leaf $path
-            $target = Join-Path $staging $leaf
-            Copy-ItemSafely -Source $path -Destination $target
+            $source = [string]$path
+            $leaf = [System.IO.Path]::GetFileName($source.TrimEnd('\'))
+            if ([string]::IsNullOrWhiteSpace($leaf)) {
+                $leaf = [System.IO.Path]::GetFileName($source)
+            }
+
+            $target = [System.IO.Path]::Combine($staging, $leaf)
+            Copy-ItemSafely -Source $source -Destination $target
             $copiedNames += $leaf
         }
 
@@ -208,9 +285,8 @@ function Send-Clipboard {
 
     [pscustomobject]@{
         action = 'send'
-        itemId = $itemId
+        item = Get-ClipboardDisplayLabel -Type $manifest.type -Names $copiedNames
         type = $manifest.type
-        relayRoot = $relayRoot
     }
 }
 
@@ -278,3 +354,4 @@ switch ($Mode) {
     'send' { Send-Clipboard }
     'receive' { Receive-Clipboard }
 }
+
