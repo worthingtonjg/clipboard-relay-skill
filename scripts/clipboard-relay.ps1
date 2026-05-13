@@ -35,7 +35,7 @@ function Resolve-RelayRoot {
     }
 
     $resolved = [System.IO.Path]::GetFullPath($RelayDir)
-    return $resolved.TrimEnd('\\')
+    return $resolved.TrimEnd('\')
 }
 
 function New-ItemId {
@@ -58,11 +58,14 @@ function Get-ClipboardText {
 
 function Get-ClipboardPaths {
     if ($script:hasInputPaths) {
-        return @($script:InputPaths)
+        return @($script:InputPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
 
     try {
-        return @((Get-Clipboard -Format FileDropList -ErrorAction Stop))
+        return @(
+            Get-Clipboard -Format FileDropList -ErrorAction Stop |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
     } catch {
         return @()
     }
@@ -125,7 +128,7 @@ function Send-Clipboard {
 
     $paths = @()
     if ($script:hasInputPaths) {
-        $paths = @($script:InputPaths)
+        $paths = @(Get-ClipboardPaths)
     } elseif (-not $NoClipboard) {
         $paths = @(Get-ClipboardPaths)
     }
