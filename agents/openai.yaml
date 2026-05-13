@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clipboard Relay"
+  short_description: "Relay clipboard text and files between machines"
+  default_prompt: "Use $clipboard-relay to send my clipboard to the relay or restore the latest relay item into my clipboard."
