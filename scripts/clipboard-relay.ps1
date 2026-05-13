@@ -114,6 +114,21 @@ function Read-Manifest {
     return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 }
 
+function Resolve-RelayPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelayRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath
+    )
+
+    if ([System.IO.Path]::IsPathRooted($RelativePath)) {
+        return $RelativePath
+    }
+
+    return Join-Path $RelayRoot $RelativePath
+}
+
 function Send-Clipboard {
     $relayRoot = Resolve-RelayRoot
     $itemsRoot = Join-Path $relayRoot 'items'
@@ -183,11 +198,11 @@ function Send-Clipboard {
     Save-Manifest -Path (Join-Path $itemDir 'manifest.json') -Manifest $manifest
 
     $latest = [ordered]@{
-        itemId    = $itemId
-        itemDir   = $itemDir
-        manifest  = Join-Path $itemDir 'manifest.json'
+        itemId     = $itemId
+        itemDir    = "items/$itemId"
+        manifest   = "items/$itemId/manifest.json"
         createdUtc = $manifest.createdUtc
-        type      = $manifest.type
+        type       = $manifest.type
     }
     Save-Manifest -Path (Join-Path $relayRoot 'latest.json') -Manifest $latest
 
@@ -207,7 +222,7 @@ function Receive-Clipboard {
     }
 
     $latest = Read-Manifest -Path $latestPath
-    $manifestPath = [string]$latest.manifest
+    $manifestPath = Resolve-RelayPath -RelayRoot $relayRoot -RelativePath ([string]$latest.manifest)
     if (-not (Test-Path -LiteralPath $manifestPath)) {
         throw "Manifest not found: $manifestPath"
     }
